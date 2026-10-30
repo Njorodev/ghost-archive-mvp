@@ -65,6 +65,15 @@ Click **Create demo archive**. The backend creates a small Git repository with a
 
 Scanning works without Ollama. AI investigation requires Ollama to be running and the selected model to be pulled.
 
+## 5. Automated tests
+
+From `backend` with the virtual environment active:
+
+```powershell
+pip install -r requirements.txt
+pytest -q
+```
+
 ## Privacy and safety
 - The MVP accepts a local filesystem path and invokes Git using argument arrays, not a shell.
 - Use only repositories you are authorized to inspect.

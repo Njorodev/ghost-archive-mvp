@@ -15,6 +15,8 @@ function App() {
   const [artifacts, setArtifacts] = useState([]);
   const [selected, setSelected] = useState(null);
   const [analysis, setAnalysis] = useState("");
+  const [evidence, setEvidence] = useState([]);
+  const [disclaimer, setDisclaimer] = useState("");
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -37,7 +39,7 @@ function App() {
   }
 
   async function makeDemo() {
-    setBusy("demo"); setError(""); setNotice(""); setAnalysis("");
+   setBusy("demo"); setError(""); setNotice(""); setAnalysis(""); setEvidence([]); setDisclaimer("");
     try {
       const data = await request("/api/demo", {});
       setRepoPath(data.repo_path);
@@ -48,7 +50,7 @@ function App() {
 
   async function scan() {
     if (!repoPath.trim()) { setError("Enter a local Git repository path, or create the demo archive."); return; }
-    setBusy("scan"); setError(""); setNotice(""); setAnalysis(""); setSelected(null);
+    setBusy("scan"); setError(""); setNotice(""); setAnalysis(""); setEvidence([]); setDisclaimer(""); setSelected(null);
     try {
       const data = await request("/api/scan", { repo_path: repoPath.trim() });
       setArtifacts(data.artifacts || []);
@@ -63,10 +65,12 @@ function App() {
 
   async function investigate() {
     if (!selected) return;
-    setBusy("ai"); setError(""); setAnalysis("");
+    setBusy("ai"); setError(""); setAnalysis(""); setEvidence([]); setDisclaimer("");
     try {
       const data = await request("/api/investigate", { artifact: selected, model });
       setAnalysis(data.response || "The model returned an empty response.");
+      setEvidence(data.evidence || []);
+      setDisclaimer(data.disclaimer || "");
     } catch (e) { setError(e.message); }
     finally { setBusy(""); }
   }
@@ -111,7 +115,7 @@ function App() {
             <div className="panel-heading compact"><div className="section-icon"><Skull size={18}/></div><div><h2>Recovered artifacts</h2><p>{artifacts.length} traces in this session</p></div><span className="count-badge">{artifacts.length.toString().padStart(2,"0")}</span></div>
             <div className="search-wrap"><Search size={15}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search names, files, commits…" /></div>
             <div className="artifact-list">
-              {filtered.map(a=><button key={a.id} className={`artifact-item ${selected?.id===a.id?"selected":""}`} onClick={()=>{setSelected(a);setAnalysis("");}}>
+              {filtered.map(a=><button key={a.id} className={`artifact-item ${selected?.id===a.id?"selected":""}`} onClick={()=>{setSelected(a);setAnalysis("");setEvidence([]);setDisclaimer("");}}>
                 <div className="artifact-file-icon"><FileCode2 size={17}/></div><div className="artifact-info"><strong>{a.path.split(/[\\/]/).pop()}</strong><span>{a.path}</span><small><Clock3 size={12}/>{a.date} <i>·</i> {a.short_commit}</small></div><ChevronRight size={16} className="artifact-chevron"/>
               </button>)}
               {!filtered.length && <div className="empty-state"><Ghost size={26}/><strong>{artifacts.length ? "No matching traces" : "The archive is silent"}</strong><span>{artifacts.length ? "Try another search term." : "Scan a repository or summon the demo archive to reveal deleted code."}</span></div>}
@@ -130,7 +134,21 @@ function App() {
               {selected.source_truncated && <p className="warning-note">Source preview is truncated to protect the local model context window.</p>}
               <div className="investigate-box"><div className="investigate-heading"><div className="ai-orb"><Sparkles size={18}/></div><div><h3>Interrogate the ghost</h3><p>Ask a local open-weight model to examine the recovered evidence.</p></div></div>
                 <label className="field-label" htmlFor="model-name">OLLAMA MODEL</label><div className="ai-controls"><input id="model-name" value={model} onChange={e=>setModel(e.target.value)} placeholder="gemma3:4b"/><button className="primary-button ai-button" onClick={investigate} disabled={!!busy || !selected.source}>{busy==="ai"?<><LoaderCircle className="spin" size={16}/> Listening…</>:<><Sparkles size={16}/> Interrogate</>}</button></div>
-                {analysis && <div className="analysis-output"><div className="analysis-label"><Sparkles size={14}/> INVESTIGATION REPORT <span>AI-GENERATED · VERIFY AGAINST SOURCE</span></div><div className="markdown-lite">{analysis}</div><div className="evidence-footer"><ShieldCheck size={14}/> Evidence anchor: <code>{selected.short_commit}</code> · {selected.path}</div></div>}
+                  {analysis && <div className="analysis-output">
+                  <div className="analysis-label"><Sparkles size={14}/> INVESTIGATION REPORT <span>AI-GENERATED · VERIFY AGAINST SOURCE</span></div>
+                  {evidence.length > 0 && <div className="evidence-stack">
+                    <div className="evidence-title"><ShieldCheck size={14}/> VERIFIED ARCHIVE EVIDENCE</div>
+                    {evidence.map((item, index) => <div className={`evidence-row ${item.kind}`} key={`${item.label}-${index}`}>
+                      <span className="evidence-kind">{item.kind === "verified" ? "VERIFIED" : item.kind === "supported" ? "SUPPORTED CLUE" : "UNCERTAIN CLUE"}</span>
+                      <strong>{item.label}</strong>
+                      <code>{item.value}</code>
+                    </div>)}
+                  </div>}
+                  <div className="hypothesis-title"><Ghost size={14}/> AI INTERPRETATION / HYPOTHESIS</div>
+                  <div className="markdown-lite">{analysis}</div>
+                  {disclaimer && <div className="ai-disclaimer"><AlertTriangle size={14}/>{disclaimer}</div>}
+                  <div className="evidence-footer"><ShieldCheck size={14}/> Evidence anchor: <code>{selected.short_commit}</code> · {selected.path}</div>
+                </div>}
               </div>
             </>}
           </section>

@@ -12,33 +12,167 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+
 APP_DIR = Path(__file__).resolve().parent
 DEMO_REPO = APP_DIR / ".ghost_demo_repo"
 MAX_SOURCE_CHARS = 18_000
 
-app = FastAPI(title="GHOST//ARCHIVE API", version="0.1.0")
+
+# -------------------------------------------------------------------
+# Evidence classification
+# -------------------------------------------------------------------
+
+def confidence_label(subject: str) -> str:
+    """
+    Classify a Git commit message as either a supported clue
+    or an uncertain clue.
+
+    This does NOT make the commit message a verified explanation
+    of developer intent. It only indicates whether the wording
+    explicitly refers to deletion/replacement/refactoring.
+    """
+    text = (subject or "").lower()
+
+    strong_terms = (
+        "remove",
+        "removed",
+        "delete",
+        "deleted",
+        "replace",
+        "replaced",
+        "refactor",
+        "refactored",
+        "deprecated",
+        "deprecate",
+        "retire",
+        "retired",
+    )
+
+    return (
+        "supported"
+        if any(term in text for term in strong_terms)
+        else "uncertain"
+    )
+
+
+def build_evidence(
+    artifact: dict[str, Any],
+) -> list[dict[str, str]]:
+    """
+    Build the evidence block returned to the frontend.
+
+    Git-derived metadata is marked as verified.
+
+    The commit message is treated as a clue rather than absolute proof
+    of why the code was removed.
+    """
+    evidence: list[dict[str, str]] = [
+        {
+            "kind": "verified",
+            "label": "Deletion commit",
+            "value": str(
+                artifact.get("commit", "unknown")
+            ),
+        },
+        {
+            "kind": "verified",
+            "label": "Historical path",
+            "value": str(
+                artifact.get("path", "unknown")
+            ),
+        },
+        {
+            "kind": "verified",
+            "label": "Deletion date",
+            "value": str(
+                artifact.get("date", "unknown")
+            ),
+        },
+    ]
+
+    subject = str(
+        artifact.get("subject", "")
+    ).strip()
+
+    if subject:
+        evidence.append(
+            {
+                "kind": confidence_label(subject),
+                "label": "Commit message",
+                "value": subject,
+            }
+        )
+
+    return evidence
+
+
+# -------------------------------------------------------------------
+# FastAPI application
+# -------------------------------------------------------------------
+
+app = FastAPI(
+    title="GHOST//ARCHIVE API",
+    version="0.1.0",
+)
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=[
+        "GET",
+        "POST",
+    ],
     allow_headers=["*"],
 )
 
 
+# -------------------------------------------------------------------
+# Request models
+# -------------------------------------------------------------------
+
 class ScanRequest(BaseModel):
-    repo_path: str = Field(min_length=1, max_length=2000)
+    repo_path: str = Field(
+        min_length=1,
+        max_length=2000,
+    )
 
 
 class InvestigateRequest(BaseModel):
     artifact: dict[str, Any]
-    model: str = Field(default="gemma3:4b", min_length=1, max_length=100)
+
+    # gemma3:1b is a better default for CPU-only machines.
+    model: str = Field(
+        default="gemma3:1b",
+        min_length=1,
+        max_length=100,
+    )
 
 
-def run_git(repo: Path, *args: str, timeout: int = 20) -> str:
+# -------------------------------------------------------------------
+# Git helpers
+# -------------------------------------------------------------------
+
+def run_git(
+    repo: Path,
+    *args: str,
+    timeout: int = 20,
+) -> str:
+    """
+    Execute a Git command safely without invoking a shell.
+    """
     try:
         result = subprocess.run(
-            ["git", "-C", str(repo), *args],
+            [
+                "git",
+                "-C",
+                str(repo),
+                *args,
+            ],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -46,88 +180,249 @@ def run_git(repo: Path, *args: str, timeout: int = 20) -> str:
             timeout=timeout,
             check=False,
         )
+
     except FileNotFoundError:
-        raise HTTPException(status_code=503, detail="Git was not found. Install Git for Windows and reopen PowerShell.")
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Git was not found. "
+                "Install Git for Windows and reopen the terminal."
+            ),
+        )
+
     except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=408, detail="Git command timed out.")
+        raise HTTPException(
+            status_code=408,
+            detail="Git command timed out.",
+        )
+
     if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "Git command failed").strip()
-        raise HTTPException(status_code=400, detail=detail[:1200])
+        detail = (
+            result.stderr
+            or result.stdout
+            or "Git command failed"
+        ).strip()
+
+        raise HTTPException(
+            status_code=400,
+            detail=detail[:1200],
+        )
+
     return result.stdout
 
 
-def validate_repo(raw_path: str) -> Path:
-    repo = Path(raw_path).expanduser().resolve()
+def validate_repo(
+    raw_path: str,
+) -> Path:
+    """
+    Validate that the supplied path exists and belongs to a Git repository.
+    """
+    repo = (
+        Path(raw_path)
+        .expanduser()
+        .resolve()
+    )
+
     if not repo.exists() or not repo.is_dir():
-        raise HTTPException(status_code=400, detail="That folder does not exist.")
-    top = run_git(repo, "rev-parse", "--show-toplevel").strip()
+        raise HTTPException(
+            status_code=400,
+            detail="That folder does not exist.",
+        )
+
+    top = run_git(
+        repo,
+        "rev-parse",
+        "--show-toplevel",
+    ).strip()
+
     if not top:
-        raise HTTPException(status_code=400, detail="Choose a Git repository.")
+        raise HTTPException(
+            status_code=400,
+            detail="Choose a Git repository.",
+        )
+
     return Path(top).resolve()
 
 
-def get_deleted_files(repo: Path) -> list[dict[str, Any]]:
-    # Each header is emitted by --format, followed by D<TAB>path rows.
+def get_deleted_files(
+    repo: Path,
+) -> list[dict[str, Any]]:
+    """
+    Search Git history for genuinely deleted files.
+
+    --find-renames helps Git distinguish renames from actual deletions.
+    """
+
     raw = run_git(
         repo,
         "log",
         "--all",
+
+        # Detect renames before filtering deletions.
+        "--find-renames",
+
+        # Only return deleted paths.
         "--diff-filter=D",
+
         "--name-status",
+
+        # Emit:
+        # commit hash<TAB>date<TAB>commit subject
         "--format=@@%H%x09%ad%x09%s",
+
         "--date=short",
         "--",
         timeout=35,
     )
+
     entries: list[dict[str, Any]] = []
+
     current: dict[str, str] | None = None
+
     for line in raw.splitlines():
+
+        # Commit metadata line
         if line.startswith("@@"):
-            bits = line[2:].split("\t", 2)
+            bits = line[2:].split(
+                "\t",
+                2,
+            )
+
             if len(bits) == 3:
-                current = {"commit": bits[0], "date": bits[1], "subject": bits[2]}
+                current = {
+                    "commit": bits[0],
+                    "date": bits[1],
+                    "subject": bits[2],
+                }
             else:
                 current = None
+
             continue
+
+        # Deleted file entry
         if current and line.startswith("D\t"):
             path = line[2:].strip()
-            if not path or path.startswith("-"):
+
+            if not path:
                 continue
-            entries.append({**current, "path": path})
-    # Keep the latest discovery per (commit,path), avoid duplicate paths within a commit.
-    seen: set[tuple[str, str]] = set()
-    unique: list[dict[str, Any]] = []
+
+            if path.startswith("-"):
+                continue
+
+            entries.append(
+                {
+                    **current,
+                    "path": path,
+                }
+            )
+
+    # Avoid duplicate commit/path combinations.
+    seen: set[
+        tuple[str, str]
+    ] = set()
+
+    unique: list[
+        dict[str, Any]
+    ] = []
+
     for entry in entries:
-        key = (entry["commit"], entry["path"])
-        if key not in seen:
-            seen.add(key)
-            unique.append(entry)
+        key = (
+            entry["commit"],
+            entry["path"],
+        )
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        unique.append(entry)
+
+    # Keep the MVP bounded for performance.
     return unique[:100]
 
 
-def recover_artifact(repo: Path, entry: dict[str, str], index: int) -> dict[str, Any]:
+def recover_artifact(
+    repo: Path,
+    entry: dict[str, str],
+    index: int,
+) -> dict[str, Any]:
+    """
+    Recover the source file from immediately before its deletion commit.
+    """
+
     commit = entry["commit"]
     path = entry["path"]
-    # Source existed immediately before the deletion commit.
-    source = run_git(repo, "show", f"{commit}^:{path}", timeout=15)
+
+    # The file existed in the parent commit immediately before deletion.
+    source = run_git(
+        repo,
+        "show",
+        f"{commit}^:{path}",
+        timeout=15,
+    )
+
+    # Detect common Python and JavaScript/TypeScript symbols.
     names = re.findall(
-        r"^\s*(?:async\s+)?(?:def|class|function)\s+([A-Za-z_$][\w$]*)|"
-        r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function|\([^)]*\)\s*=>)",
+        (
+            r"^\s*"
+            r"(?:async\s+)?"
+            r"(?:def|class|function)\s+"
+            r"([A-Za-z_$][\w$]*)"
+            r"|"
+            r"^\s*"
+            r"(?:export\s+)?"
+            r"(?:const|let|var)\s+"
+            r"([A-Za-z_$][\w$]*)"
+            r"\s*=\s*"
+            r"(?:async\s*)?"
+            r"(?:"
+            r"function"
+            r"|"
+            r"\([^)]*\)\s*=>"
+            r")"
+        ),
         source,
         flags=re.MULTILINE,
     )
-    symbols = list(dict.fromkeys(a or b for a, b in names if a or b))[:40]
+
+    symbols = list(
+        dict.fromkeys(
+            a or b
+            for a, b in names
+            if a or b
+        )
+    )[:40]
+
     return {
         "id": f"{commit[:8]}-{index}",
+
         "path": path,
+
         "commit": commit,
+
         "short_commit": commit[:8],
+
         "date": entry["date"],
+
         "subject": entry["subject"],
-        "source": source[:MAX_SOURCE_CHARS],
-        "source_truncated": len(source) > MAX_SOURCE_CHARS,
+
+        "source": source[
+            :MAX_SOURCE_CHARS
+        ],
+
+        "source_truncated": (
+            len(source)
+            > MAX_SOURCE_CHARS
+        ),
+
         "symbols": symbols,
-        "language": Path(path).suffix.lstrip(".") or "text",
+
+        "language": (
+            Path(path)
+            .suffix
+            .lstrip(".")
+            or "text"
+        ),
     }
 
 
@@ -261,10 +556,6 @@ Use these headings:
     return {
         "model": body.get("model", model),
         "response": body.get("response", "").strip(),
-        "evidence": {
-            "path": artifact.get("path"),
-            "commit": artifact.get("commit"),
-            "date": artifact.get("date"),
-            "subject": artifact.get("subject"),
-        },
+        "evidence": build_evidence(artifact),
+        "disclaimer": "AI interpretation is a hypothesis unless supported by the verified Git evidence above.",
     }
