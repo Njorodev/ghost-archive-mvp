@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+import os
 import re
 import shutil
 import subprocess
@@ -17,7 +17,10 @@ APP_DIR = Path(__file__).resolve().parent
 DEMO_REPO = APP_DIR / ".ghost_demo_repo"
 MAX_SOURCE_CHARS = 18_000
 
-
+if os.getenv("VERCEL"):
+    DEMO_REPO = Path("/tmp/.ghost_demo_repo")
+else:
+    DEMO_REPO = Path(".ghost_demo_repo")
 # -------------------------------------------------------------------
 # Evidence classification
 # -------------------------------------------------------------------
@@ -440,39 +443,57 @@ def health():
 def create_demo():
     if DEMO_REPO.exists():
         shutil.rmtree(DEMO_REPO)
-    DEMO_REPO.mkdir(parents=True)
+
+    DEMO_REPO.mkdir(parents=True, exist_ok=True)
+
     def git(*args: str):
         subprocess.run(
             ["git", "-C", str(DEMO_REPO), *args],
-            capture_output=True, text=True, check=True, timeout=15
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=15,
         )
+
     try:
         git("init", "-b", "main")
         git("config", "user.name", "Archive Demo")
         git("config", "user.email", "demo@ghost-archive.local")
+
         (DEMO_REPO / "README.md").write_text(
-            "# Haunted Demo Repository\n\nA tiny repository created to demonstrate code archaeology.\n",
+            "# Haunted Demo Repository\n\n"
+            "A tiny repository created to demonstrate code archaeology.\n",
             encoding="utf-8",
         )
+
         (DEMO_REPO / "legacy.py").write_text(
             '"""Historical billing helpers from the demo archive."""\n\n'
             'def calculate_legacy_total(items, tax_rate=0.16):\n'
-            '    """Calculate a total using the old inclusive-tax rule."""\n'
             '    subtotal = sum(item["price"] * item["quantity"] for item in items)\n'
             '    return round(subtotal * (1 + tax_rate), 2)\n\n'
             'def format_receipt(total):\n'
             '    return f"LEGACY TOTAL: {total:.2f}"\n',
             encoding="utf-8",
         )
+
         git("add", ".")
         git("commit", "-m", "Add legacy billing helpers")
+
         (DEMO_REPO / "legacy.py").unlink()
+
         git("add", "-A")
         git("commit", "-m", "Remove legacy billing module after billing refactor")
-    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-        raise HTTPException(status_code=500, detail=f"Could not create demo repository. Is Git installed and configured? {exc}")
-    return {"repo_path": str(DEMO_REPO.resolve()), "message": "Demo archive created with a deleted Python module."}
 
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not create demo repository. Is Git installed and configured? {exc}",
+        )
+
+    return {
+        "repo_path": str(DEMO_REPO),
+        "message": "Demo archive created with a deleted Python module.",
+    }
 
 @app.post("/api/scan")
 def scan(request: ScanRequest):
