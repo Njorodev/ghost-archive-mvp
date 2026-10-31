@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Ghost, ScanSearch, FolderGit2, ShieldCheck, Activity, Search,
   Sparkles, Terminal, ChevronRight, FileCode2, Clock3, GitCommit,
@@ -11,7 +13,7 @@ const API = "http://127.0.0.1:8000";
 
 function App() {
   const [repoPath, setRepoPath] = useState("");
-  const [model, setModel] = useState("gemma3:4b");
+  const [model, setModel] = useState("gemma3:1b");
   const [artifacts, setArtifacts] = useState([]);
   const [selected, setSelected] = useState(null);
   const [analysis, setAnalysis] = useState("");
@@ -133,7 +135,7 @@ function App() {
               <pre className="code-block"><code>{selected.source}</code></pre>
               {selected.source_truncated && <p className="warning-note">Source preview is truncated to protect the local model context window.</p>}
               <div className="investigate-box"><div className="investigate-heading"><div className="ai-orb"><Sparkles size={18}/></div><div><h3>Interrogate the ghost</h3><p>Ask a local open-weight model to examine the recovered evidence.</p></div></div>
-                <label className="field-label" htmlFor="model-name">OLLAMA MODEL</label><div className="ai-controls"><input id="model-name" value={model} onChange={e=>setModel(e.target.value)} placeholder="gemma3:4b"/><button className="primary-button ai-button" onClick={investigate} disabled={!!busy || !selected.source}>{busy==="ai"?<><LoaderCircle className="spin" size={16}/> Listening…</>:<><Sparkles size={16}/> Interrogate</>}</button></div>
+                <label className="field-label" htmlFor="model-name">OLLAMA MODEL</label><div className="ai-controls"><input id="model-name" value={model} onChange={e=>setModel(e.target.value)} placeholder="gemma3:1b"/><button className="primary-button ai-button" onClick={investigate} disabled={!!busy || !selected.source}>{busy==="ai"?<><LoaderCircle className="spin" size={16}/> Listening…</>:<><Sparkles size={16}/> Interrogate</>}</button></div>
                   {analysis && <div className="analysis-output">
                   <div className="analysis-label"><Sparkles size={14}/> INVESTIGATION REPORT <span>AI-GENERATED · VERIFY AGAINST SOURCE</span></div>
                   {evidence.length > 0 && <div className="evidence-stack">
@@ -144,10 +146,129 @@ function App() {
                       <code>{item.value}</code>
                     </div>)}
                   </div>}
-                  <div className="hypothesis-title"><Ghost size={14}/> AI INTERPRETATION / HYPOTHESIS</div>
-                  <div className="markdown-lite">{analysis}</div>
-                  {disclaimer && <div className="ai-disclaimer"><AlertTriangle size={14}/>{disclaimer}</div>}
-                  <div className="evidence-footer"><ShieldCheck size={14}/> Evidence anchor: <code>{selected.short_commit}</code> · {selected.path}</div>
+                    <div className="hypothesis-title">
+                      <Ghost size={14} />
+                      AI INTERPRETATION / HYPOTHESIS
+                    </div>
+
+                    <div className="markdown-lite">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          h1: ({ children }) => (
+                            <h1 className="md-h1">{children}</h1>
+                          ),
+
+                          h2: ({ children }) => (
+                            <h2 className="md-h2">{children}</h2>
+                          ),
+
+                          h3: ({ children }) => (
+                            <h3 className="md-h3">{children}</h3>
+                          ),
+
+                          p: ({ children }) => (
+                            <p className="md-paragraph">{children}</p>
+                          ),
+
+                          ul: ({ children }) => (
+                            <ul className="md-list">{children}</ul>
+                          ),
+
+                          ol: ({ children }) => (
+                            <ol className="md-list md-numbered">
+                              {children}
+                            </ol>
+                          ),
+
+                          li: ({ children }) => (
+                            <li className="md-list-item">
+                              {children}
+                            </li>
+                          ),
+
+                          blockquote: ({ children }) => (
+                            <blockquote className="md-quote">
+                              {children}
+                            </blockquote>
+                          ),
+
+                          strong: ({ children }) => (
+                            <strong className="md-strong">
+                              {children}
+                            </strong>
+                          ),
+
+                          em: ({ children }) => (
+                            <em className="md-em">
+                              {children}
+                            </em>
+                          ),
+
+                          pre: ({ children }) => (
+                            <pre className="md-code-block">
+                              {children}
+                            </pre>
+                          ),
+
+                          code: ({ children, className, ...props }) => {
+                            const isBlock =
+                              className?.startsWith("language-");
+
+                            if (isBlock) {
+                              return (
+                                <code
+                                  className={`md-code ${className || ""}`}
+                                  {...props}
+                                >
+                                  {children}
+                                </code>
+                              );
+                            }
+
+                            return (
+                              <code
+                                className="md-inline-code"
+                                {...props}
+                              >
+                                {children}
+                              </code>
+                            );
+                          },
+
+                          hr: () => (
+                            <hr className="md-divider" />
+                          ),
+
+                          a: ({ href, children }) => (
+                            <a
+                              href={href}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="md-link"
+                            >
+                              {children}
+                            </a>
+                          ),
+                        }}
+                      >
+                        {analysis}
+                      </ReactMarkdown>
+                    </div>
+
+                    {disclaimer && (
+                      <div className="ai-disclaimer">
+                        <AlertTriangle size={14} />
+                        {disclaimer}
+                      </div>
+                    )}
+
+                    <div className="evidence-footer">
+                      <ShieldCheck size={14} />
+                      Evidence anchor:
+                      <code>{selected.short_commit}</code>
+                      · {selected.path}
+                    </div>
                 </div>}
               </div>
             </>}
