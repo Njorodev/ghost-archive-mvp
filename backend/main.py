@@ -530,19 +530,27 @@ def scan(request: ScanRequest):
             "count": 1,
             "artifacts": [
                 {
+                    "id": "demo-legacy-0",
                     "path": "legacy.py",
-                    "language": "python",
-                    "status": "deleted",
-                    "commit": "demo-002",
-                    "message": "Remove legacy billing module after billing refactor",
-                    "content": (
+                    "commit": "demo-002-demo-002-demo-002",
+                    "short_commit": "demo-002",
+                    "date": "2026-10-29",
+                    "subject": "Remove legacy billing module after billing refactor",
+                    "source": (
                         '"""Historical billing helpers from the demo archive."""\n\n'
                         'def calculate_legacy_total(items, tax_rate=0.16):\n'
+                        '    """Calculate a total using the old inclusive-tax rule."""\n'
                         '    subtotal = sum(item["price"] * item["quantity"] for item in items)\n'
                         '    return round(subtotal * (1 + tax_rate), 2)\n\n'
                         'def format_receipt(total):\n'
                         '    return f"LEGACY TOTAL: {total:.2f}"\n'
                     ),
+                    "source_truncated": False,
+                    "symbols": [
+                        "calculate_legacy_total",
+                        "format_receipt",
+                    ],
+                    "language": "py",
                 }
             ],
             "warnings": [],

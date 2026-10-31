@@ -27,10 +27,15 @@ function App() {
   const [notice, setNotice] = useState("");
   const [copied, setCopied] = useState(false);
 
-  const filtered = useMemo(() => artifacts.filter((a) =>
-    `${a.path} ${a.subject} ${a.symbols.join(" ")}`.toLowerCase().includes(search.toLowerCase())
-  ), [artifacts, search]);
-
+  const filtered = useMemo(
+    () =>
+      artifacts.filter((a) =>
+        `${a.path ?? ""} ${a.subject ?? ""} ${(a.symbols ?? []).join(" ")}`
+          .toLowerCase()
+          .includes(search.toLowerCase())
+      ),
+    [artifacts, search]
+  );
   async function request(path, body) {
     const response = await fetch(`${API}${path}`, {
       method: "POST",
