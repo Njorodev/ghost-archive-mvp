@@ -523,17 +523,49 @@ def create_demo():
 
 @app.post("/api/scan")
 def scan(request: ScanRequest):
+    # Vercel demo mode
+    if os.getenv("VERCEL") and request.repo_path == "/tmp/.ghost_demo_repo":
+        return {
+            "repo_path": request.repo_path,
+            "count": 1,
+            "artifacts": [
+                {
+                    "path": "legacy.py",
+                    "language": "python",
+                    "status": "deleted",
+                    "commit": "demo-002",
+                    "message": "Remove legacy billing module after billing refactor",
+                    "content": (
+                        '"""Historical billing helpers from the demo archive."""\n\n'
+                        'def calculate_legacy_total(items, tax_rate=0.16):\n'
+                        '    subtotal = sum(item["price"] * item["quantity"] for item in items)\n'
+                        '    return round(subtotal * (1 + tax_rate), 2)\n\n'
+                        'def format_receipt(total):\n'
+                        '    return f"LEGACY TOTAL: {total:.2f}"\n'
+                    ),
+                }
+            ],
+            "warnings": [],
+        }
+
+    # Local mode (real repository scanning)
     repo = validate_repo(request.repo_path)
     deleted = get_deleted_files(repo)
+
     artifacts: list[dict[str, Any]] = []
     errors: list[str] = []
+
     for i, entry in enumerate(deleted):
         try:
             artifacts.append(recover_artifact(repo, entry, i))
         except HTTPException as exc:
-            errors.append(f"{entry['path']} at {entry['commit'][:8]}: {exc.detail}")
+            errors.append(
+                f"{entry['path']} at {entry['commit'][:8]}: {exc.detail}"
+            )
+
         if len(artifacts) >= 50:
             break
+
     return {
         "repo_path": str(repo),
         "count": len(artifacts),
