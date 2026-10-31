@@ -441,14 +441,40 @@ def health():
 
 @app.post("/api/demo")
 def create_demo():
-    if DEMO_REPO.exists():
-        shutil.rmtree(DEMO_REPO)
+    # Vercel serverless environment
+    if os.getenv("VERCEL"):
+        return {
+            "repo_path": "/tmp/.ghost_demo_repo",
+            "message": "Demo archive created with a deleted Python module.",
+            "commits": [
+                {
+                    "hash": "demo-001",
+                    "message": "Add legacy billing helpers",
+                },
+                {
+                    "hash": "demo-002",
+                    "message": "Remove legacy billing module after billing refactor",
+                },
+            ],
+            "deleted_files": [
+                {
+                    "path": "legacy.py",
+                    "last_commit": "demo-002",
+                }
+            ],
+        }
 
-    DEMO_REPO.mkdir(parents=True, exist_ok=True)
+    # Local development uses a real Git repository
+    demo_repo = Path(".ghost_demo_repo")
+
+    if demo_repo.exists():
+        shutil.rmtree(demo_repo)
+
+    demo_repo.mkdir(parents=True, exist_ok=True)
 
     def git(*args: str):
         subprocess.run(
-            ["git", "-C", str(DEMO_REPO), *args],
+            ["git", "-C", str(demo_repo), *args],
             capture_output=True,
             text=True,
             check=True,
@@ -460,13 +486,13 @@ def create_demo():
         git("config", "user.name", "Archive Demo")
         git("config", "user.email", "demo@ghost-archive.local")
 
-        (DEMO_REPO / "README.md").write_text(
+        (demo_repo / "README.md").write_text(
             "# Haunted Demo Repository\n\n"
             "A tiny repository created to demonstrate code archaeology.\n",
             encoding="utf-8",
         )
 
-        (DEMO_REPO / "legacy.py").write_text(
+        (demo_repo / "legacy.py").write_text(
             '"""Historical billing helpers from the demo archive."""\n\n'
             'def calculate_legacy_total(items, tax_rate=0.16):\n'
             '    subtotal = sum(item["price"] * item["quantity"] for item in items)\n'
@@ -479,7 +505,7 @@ def create_demo():
         git("add", ".")
         git("commit", "-m", "Add legacy billing helpers")
 
-        (DEMO_REPO / "legacy.py").unlink()
+        (demo_repo / "legacy.py").unlink()
 
         git("add", "-A")
         git("commit", "-m", "Remove legacy billing module after billing refactor")
@@ -491,7 +517,7 @@ def create_demo():
         )
 
     return {
-        "repo_path": str(DEMO_REPO),
+        "repo_path": str(demo_repo.resolve()),
         "message": "Demo archive created with a deleted Python module.",
     }
 
